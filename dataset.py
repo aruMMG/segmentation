@@ -219,30 +219,48 @@ def prepare_for_coco(predictions):
             ]
         )
     return coco_results   
+
+
+def collate_fn(batch):
+    """
+    Custom collate function for handling batches with varying number of objects.
     
+    Args:
+    - batch: List of tuples (image, target) from the dataset.
+    
+    Returns:
+    - batched_images: Tensor of images stacked along the first dimension.
+    - batched_targets: List of dictionaries, one for each image.
+    """
+    batched_images = torch.stack([item[0] for item in batch])
+    batched_targets = [item[1] for item in batch]
+    
+    return batched_images, batched_targets
 if __name__=="__main__":
-    dataset = COCODataset("./", json_file="instances_val.json", train=True)
-    print(len(dataset))
-    indices = torch.randperm(len(dataset)).tolist()
-    d_train = torch.utils.data.Subset(dataset, indices)
+    # dataset = COCODataset("./", json_file="instances_val.json", train=True)
+    # print(len(dataset))
+    # indices = torch.randperm(len(dataset)).tolist()
+    # d_train = torch.utils.data.Subset(dataset, indices)
 
-    num_classes = max(d_train.dataset.classes) + 1 # including background class
-    print(num_classes)
-    # from torch.utils.data import DataLoader
+    # num_classes = max(d_train.dataset.classes) + 1 # including background class
+    # print(num_classes)
+    from torch.utils.data import DataLoader
 
-    # # Assuming your CustomCOCODataset class is already defined as shown previously
-    # # Initialize your dataset
-    # dataset = CustomCOCODataset(image_dir="val/",
-    #                             annotation_file="instances_val.json",
-    #                             transforms=T.Compose([
-    #                                 T.ToTensor(),  # Convert the image to PyTorch tensor
-    #                                 # Add any other transformations here
-    #                             ]))
+    # Assuming your CustomCOCODataset class is already defined as shown previously
+    # Initialize your dataset
+    dataset = CustomCOCODataset(image_dir="val/",
+                                annotation_file="instances_val.json",
+                                transforms=T.Compose([
+                                    T.ToTensor(),  # Convert the image to PyTorch tensor
+                                    # Add any other transformations here
+                                ]))
 
-    # # Create the DataLoader with batch size of 1
-    # data_loader = DataLoader(dataset, batch_size=1, shuffle=True, num_workers=0)
+    # Create the DataLoader with batch size of 1
+    data_loader = DataLoader(dataset, batch_size=2, shuffle=True, num_workers=0, collate_fn=collate_fn)
 
-    # # Example of iterating over the DataLoader
-    # for images, targets in data_loader:
-    #     # Your training or validation code here
-    #     print(images.shape)
+    # Example of iterating over the DataLoader
+    for images, targets in data_loader:
+        # Your training or validation code here
+        print(images.shape)
+        for target in targets:
+            print(target["boxes"])

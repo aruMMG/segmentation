@@ -5,32 +5,66 @@ import re
 import time
 
 import torch
-from dataset import CustomCOCODataset, COCODataset
+from dataset import CustomCOCODataset, COCODataset, collate_fn
 from torchvision.transforms import transforms as T
 from torch.utils.data import DataLoader
 import torchvision
 import torchvision.models.detection
 import torchvision.models.detection.mask_rcnn
 import torch.nn as nn
-from engine import evaluate, train_one_epoch
 from utils.gpu import collect_gpu_info
 from utils.utils import save_ckpt
 
+def train_one_epoch(model, optimizer, data_loader, device, epoch, args, scaler=None):
+    # for p in optimizer.param_groups:
+    #     p["lr"] = args.lr_epoch
+    lr_scheduler = None
+    if epoch == 0:
+        warmup_factor = 1.0 / 1000
+        warmup_iters = min(1000, len(data_loader) - 1)
+
+        lr_scheduler = torch.optim.lr_scheduler.LinearLR(
+            optimizer, start_factor=warmup_factor, total_iters=warmup_iters
+        )
+    iters = len(data_loader) if args.iters < 0 else args.iters
+
+    model.train()
+    A = time.time()
+    for i, (images, targets) in enumerate(data_loader):
+        images = list(image.to(device) for image in images)
+        targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
+        with torch.cuda.amp.autocast(enabled=scaler is not None):
+            loss_dict = model(images, targets)
+            losses = sum(loss for loss in loss_dict.values())
+
+        optimizer.zero_grad()
+        if scaler is not None:
+            scaler.scale(losses).backward()
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            losses.backward()
+            optimizer.step()
+
+        if lr_scheduler is not None:
+            lr_scheduler.step()
+           
+    A = time.time() - A
+    print("iter: {:.1f}, total: {:.1f}, model: {:.1f}, backward: {:.1f}".format(1000*A/iters,1000*t_m.avg,1000*m_m.avg,1000*b_m.avg))
+    return A / iters
+ 
+
 # -------------------------------------------------------------------------- #
 def main(args):
-    # dataset = CustomCOCODataset(args.img_dir, args.ann, transforms=T.Compose([
-    #                             T.ToTensor(),]))
-    # data_loader = DataLoader(dataset, batch_size=1, shuffle=True, num_workers=0)
+    dataset = CustomCOCODataset(args.data_dir, args.json_file, transforms=T.Compose([
+                                T.ToTensor(),]))
+    d_train = DataLoader(dataset, batch_size=2, shuffle=True, num_workers=0, collate_fn=collate_fn)
 
     device = "cuda"
-    dataset = COCODataset(args.data_dir, json_file=args.json_file, train=True)
-
-    indices = torch.randperm(len(dataset)).tolist()
-    d_train = torch.utils.data.Subset(dataset, indices)
 
     args.warmup_iters = max(1000, len(d_train))
 
-    num_classes = max(d_train.dataset.classes) + 1 # including background class
+    num_classes = 4 # including background class
 
 
     model = torchvision.models.get_model(
@@ -134,7 +168,7 @@ if __name__ == "__main__":
     )
 
     parser.add_argument("--json_file", default="instances_val.json", help="coco format json file")
-    parser.add_argument("--data_dir", default="./")
+    parser.add_argument("--data_dir", default="./val")
     parser.add_argument("--ckpt-path", default="Exp", help="path for checkpoint")
     parser.add_argument("--results")
     
